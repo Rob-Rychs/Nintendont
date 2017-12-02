@@ -998,6 +998,10 @@ static bool GameNeedsHook()
 			(TITLE_ID) == 0x475951 ||	// Mario Superstar Baseball
 			(TITLE_ID) == 0x47534F ||	// Sonic Mega Collection
 			(TITLE_ID) == 0x474244 ||	// BloodRayne
+			(TITLE_ID) == 0x475438 ||	// Big Mutha Truckers
+			(TITLE_ID) == 0x475153 ||	// Tales of Symphonia
+			(TITLE_ID) == 0x474645 ||	// Fire Emblem
+			(TITLE_ID) == 0x47414C ||	// Super Smash Bros. Melee
 			(GAME_ID) == 0x474F544A ||	// One Piece - Treasure Battle
 			(GAME_ID) == 0x4747504A ||	// SD Gundam Gashapon Wars
 			DemoNeedsHookPatch() );
@@ -2433,7 +2437,8 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 						} break;
 						case FCODE___OSReadROM:	//	__OSReadROM
 						{
-							if(read32(FOffset+0x80) == 0x38A00004)
+							if(read32(FOffset+0x80) == 0x38A00004 ||
+								read32(FOffset+0xA8) == 0x38A00004)
 							{
 								memcpy((void*)FOffset, ReadROM, ReadROM_size);
 								printpatchfound(CurPatterns[j].Name, CurPatterns[j].Type, FOffset);
@@ -2620,7 +2625,8 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 						} break;
 						case FCODE_ReadROM:
 						{
-							if(read32(FOffset+0x3C) == 0x3BE00100 || 
+							if(read32(FOffset+0x30) == 0x3BE00100 || 
+								read32(FOffset+0x3C) == 0x3BE00100 || 
 								read32(FOffset+0x44) == 0x38800100)
 							{
 								memcpy((void*)FOffset, ReadROM, ReadROM_size);
@@ -2997,6 +3003,24 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 							else
 								CurPatterns[j].Found = 0;
 						} break;
+						case FCODE___DSPHandler_DBG:
+						{
+							if(useipl == 1) break;
+							if(read32(FOffset + 0x14C) == 0x2C000000)
+							{
+								if(DSPHandlerNeeded)
+								{
+									PatchBL( PatchCopy(__DSPHandler, __DSPHandler_size), (FOffset + 0x14C) );
+									printpatchfound(CurPatterns[j].Name, CurPatterns[j].Type, FOffset);
+								}
+								else
+								{
+									dbgprintf("Patch:[__DSPHandler] skipped (0x%08X)\r\n", FOffset);
+								}
+							}
+							else
+								CurPatterns[j].Found = 0;
+						} break;
 						case FCODE_PatchPatchBuffer:
 						{
 							PatchPatchBuffer( (char*)FOffset );
@@ -3349,6 +3373,11 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 			write32(0x1373618, 0x38600000);
 			dbgprintf("Patch:Patched Gamecube PAL IPL v1.2\r\n");
 		}
+		else if(read32(0x13692F4) == 0x38600001)
+		{
+			write32(0x13692F4, 0x38600000);
+			dbgprintf("Patch:Patched Gamecube MPAL IPL v1.1\r\n");
+		}
 	}
 	else if( TITLE_ID == 0x474256 )	// Batman Vengeance
 	{
@@ -3537,11 +3566,39 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 		//skip modem detection error to let demo boot up
 		if(write32A(0x194F40, 0x4182002C, 0x4082002C, 0))
 		{
-			dbgprintf("Patch:Patched Phantasy Star Online Demo JAP\r\n");
+			dbgprintf("Patch:Patched Phantasy Star Online Demo NTSC-J\r\n");
+		}
+	}
+	else if( GAME_ID == 0x33303145 )
+	{
+		if(read32(0x110F898) == 0x3C630C00 && read32(0x110F8A0) == 0x6403C000)
+		{
+			//UnkReport
+			//memcpy((void*)0x110F100, OSReportDM, sizeof(OSReportDM));
+			//sync_after_write((void*)0x110F100, sizeof(OSReportDM));
+			//UnkReport2
+			//write32(0x110F1C8, 0x7C832378); // mr  r3,r4
+			//write32(0x110F1CC, 0x7CA42B78); // mr  r4,r5
+			//memcpy((void*)0x110F1D0, OSReportDM, sizeof(OSReportDM));
+			//sync_after_write((void*)0x110F1D0, sizeof(OSReportDM));
+			//DI Regs get set up weirdly so PatchFuncInterface misses this
+			write32(0x110F898, 0x60000000); // nop this line out, not needed
+			write32(0x110F8A0, 0x6403D302); // Patch to: oris r3, r0, 0xD302
+			dbgprintf("Patch:Patched GameCube Service Disc NTSC-U\r\n");
 		}
 	}
 	if(videoPatches)
 	{
+		bool video60hzPatch = false;
+		if( ConfigGetConfig(NIN_CFG_FORCE_PROG) )
+			video60hzPatch = true; //480p 60hz
+		else if( ConfigGetVideoMode() & NIN_VID_FORCE )
+		{
+			u8 NinForceMode = ConfigGetVideoMode() & NIN_VID_FORCE_MASK;
+			if(NinForceMode == NIN_VID_FORCE_PAL60 || NinForceMode == NIN_VID_FORCE_NTSC 
+					|| NinForceMode == NIN_VID_FORCE_MPAL)
+				video60hzPatch = true; //480i 60hz
+		}
 		if( TITLE_ID == 0x47454F ) // Capcom vs. SNK 2 EO
 		{
 			//fix for force progressive
@@ -3592,6 +3649,61 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 				dbgprintf("Patch:Patched Swingerz Golf NTSC-U\r\n");
 			}
 		}
+		else if( GAME_ID == 0x474C4D50 ) // Luigis Mansion PAL
+		{
+			if(video60hzPatch && read32(0x7A44) == 0x880D00CC)
+			{
+				//start in PAL60
+				write32(0x7A44, 0x38000001);
+				dbgprintf("Patch:Patched Luigis Mansion PAL\r\n");
+			}
+		}
+		else if( GAME_ID == 0x474B4450 ) // Doshin the Giant PAL
+		{
+			if(video60hzPatch && read32(0x15D04) == 0x38C00010 && read32(0x97F8C) == 0x7FE3FB78)
+			{
+				//start in PAL60 (cheat from Ralf@gc-forever)
+				write32(0x15D04, 0x38C00000);
+				write32(0x97F8C, 0x38600005);
+				dbgprintf("Patch:Patched Doshin the Giant PAL\r\n");
+			}
+		}
+		else if( GAME_ID == 0x474D5050 ) // Mario Party 4 PAL
+		{
+			if(video60hzPatch && read32(0x57F0) == 0x3863AE34)
+			{
+				//start in PAL60 (cheat from Ralf@gc-forever)
+				write32(0x57F0, 0x3863AE70);
+				dbgprintf("Patch:Patched Mario Party 4 PAL\r\n");
+			}
+		}
+		else if( GAME_ID == 0x47503550 ) // Mario Party 5 PAL
+		{
+			if(video60hzPatch && read32(0x58E4) == 0x3863FEB4)
+			{
+				//start in PAL60 (cheat from Ralf@gc-forever)
+				write32(0x58E4, 0x3863FEF0);
+				dbgprintf("Patch:Patched Mario Party 5 PAL\r\n");
+			}
+		}
+		else if( GAME_ID == 0x47503650 ) // Mario Party 6 PAL
+		{
+			if(video60hzPatch && read32(0x5964) == 0x3863C4C4)
+			{
+				//start in PAL60 (cheat from Ralf@gc-forever)
+				write32(0x5964, 0x3863C500);
+				dbgprintf("Patch:Patched Mario Party 6 PAL\r\n");
+			}
+		}
+		else if( GAME_ID == 0x47503750 ) // Mario Party 7 PAL
+		{
+			if(video60hzPatch && read32(0x5964) == 0x3863BFC4)
+			{
+				//start in PAL60 (cheat from Ralf@gc-forever)
+				write32(0x5964, 0x3863C000);
+				dbgprintf("Patch:Patched Mario Party 7 PAL\r\n");
+			}
+		}
 	}
 	PatchStaticTimers();
 
@@ -3599,6 +3711,7 @@ void DoPatches( char *Buffer, u32 Length, u32 DiscOffset )
 
 	UseReadLimit = 1;
 	// Datel discs require read speed. (Related to Stop motor/Read Header?) 
+	// Triforce titles, and the N64 Emu work better without read speed
 	if((RealDiscCMD != 0 && !Datel) || TRIGame != TRI_NONE || IsN64Emu 
 			|| ConfigGetConfig(NIN_CFG_REMLIMIT))
 		UseReadLimit = 0;
